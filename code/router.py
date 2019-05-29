@@ -10,6 +10,7 @@ def startRouting():
     t1 = Thread(target = readInput)
     t2 = Thread(target = receiveMsgs)
     update()
+    updateRoutes()
     t1.start()
     t2.start()
     t1.join()
@@ -130,6 +131,7 @@ def update():
     print("Sending update...")
     sendUpdateMsg()
     Timer(pi, update).start()
+    
 
 # Cria uma tabela de vetor de distâncias com IPs
 # de 127.0.1.1 até 127.0.1.16
@@ -146,10 +148,40 @@ def createDistanceTable():
     return dt
 
 def updateTable(source, distances):
+    # Toda vez que atualizar a tabela,
+    # Atualiza o tempo?
+    # Talvez um contador +1 para que
+    # Na hora que der 4pi saiba que a 
+    # Rota foi atualizada
+    pass
     
 def findNextHop(dest):
+    # Lembrar de fazer balanceamento de carga aqui
+    # Uma hora vai numa rota, outra hora vai na outra
+    # Suponha: duas rotas no máximo com mesmo custo
+    pass
     
 def createPayload():
+    # Tuplas com (destino, próx. hop, custo)
+    pass
+    
+def updateRoutes():
+    print("Removing old routes...")
+    removeOldRoutes()
+    Timer(4*pi, updateRoutes).start()
+    
+def removeOldRoutes():
+    # Encontra rotas que não foram atualizadas por 4pi s...?
+    # Zera o contador de atualização?
+    pass
+    
+    '''
+    Ideia para implementar aquele trem de rotas desatualizadas: 
+    coloca um contador pra cada rota, a cada update soma +1 no contador, 
+    quando der 4pi, se tiver 4 na rota, ela está atualizada, se não, ela 
+    será removida. Aí também todos os contadores serão zerados. 
+    Só que isso tem que ser MUITO rápido... Ou para tudo até terminar.
+    '''
 
 '''
 Inicializaçao 
