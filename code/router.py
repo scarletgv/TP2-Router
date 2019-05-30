@@ -86,13 +86,11 @@ def receiveMsgs():
         else:
             print("Invalid message received.")
             
-def addLink(dest, weight):
-    dt[dest] = weight
-    neighbours.append(dest)
+def addLink(destination, weight):
+    dt[destination].append({'dest': destination, 'weight': weight})
     
-def delLink(dest):
-    dt[dest] = float('inf')
-    neighbours.remove(dest)
+def delLink(destination):
+    dt[destination] = []
     
 def sendTableRequestMsg(dest):
     trMsg = {'type': 'table', 'source': IP, 'destination': dest}
@@ -103,10 +101,11 @@ def sendTraceMsg(dest):
     sendMsg(traceMsg)
     
 def sendUpdateMsg():
-    for key in neighbours:
-        distL = createDistancesList(key)
-        updateMsg = {'type': 'update', 'source': IP, 'destination': key, 'distances': distL}
-        sendMsg(updateMsg, key)
+    for neighbour in neighbours:
+        distL = createDistancesList(neighbour)
+        nextHop = findNextHop(neighbour)
+        updateMsg = {'type': 'update', 'source': IP, 'destination': neighbour, 'distances': distL}     
+        sendMsg(updateMsg, nextHop)    
         
 def sendDataMsg(address):
     pl = createPayload()
@@ -114,18 +113,24 @@ def sendDataMsg(address):
     sendMsg(dataMsg, address)
         
 def createDistancesList(dest):
-    dl = []
-    for key, value in dt:
-        # Não inclui o destino, evitando split horizon
-        if key != dest:
-            dl.append((key,value))
+    dl = {}
+    minWeight = 10000
+    for router in dt:
+        if router != dest:
+            if dt[router]:
+                for route in dt[router]:
+                    if route['weight'] < minWeight:
+                        minWeight = route['weight']
+                if minWeight < 10000: # Se existe uma rota com menor custo
+                    dl[router] = minWeight
+                minWeight = 10000
     return dl
         
 def sendMsg(msg, dest):
     msgJSON = json.dumps(msg)
     print("Message sent: "+str(msgJSON))
     router = findNextHop(dest)
-    s.sendto(msgJSON, (router,PORT))
+    s.sendto(msgJSON, router)
     
 def update():
     print("Sending update...")
@@ -135,16 +140,14 @@ def update():
 
 # Cria uma tabela de vetor de distâncias com IPs
 # de 127.0.1.1 até 127.0.1.16
-def createDistanceTable():
+def createDistanceTable(IP):
     addressList = ['127.0.1.' for i in range(0,16)]
     
     for i in range(0,16):
         addressList[i] += str(i+1)
     
-    dt = {key:float('inf') for key in addressList}
-    # Para ele mesmo, o custo é zero
+    dt = {key:[] for key in addressList}
     dt[IP] = 0
-    
     return dt
 
 def updateTable(source, distances):
@@ -159,7 +162,17 @@ def findNextHop(dest):
     # Lembrar de fazer balanceamento de carga aqui
     # Uma hora vai numa rota, outra hora vai na outra
     # Suponha: duas rotas no máximo com mesmo custo
-    pass
+    minWeight = 10000
+    nxtHop = ''
+    
+    for router in dt:
+        if dt[router]:
+            for route in dt[router]:
+                if route['dest'] == dest:
+                    if route['weight'] < minWeight:
+                        minWeight = route['weight']
+                        nxtHop = router             
+    return nxtHop  
     
 def createPayload():
     # Tuplas com (destino, próx. hop, custo)
