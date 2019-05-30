@@ -88,17 +88,21 @@ def receiveMsgs():
             
 def addLink(destination, weight):
     dt[destination].append({'dest': destination, 'weight': weight})
+    neighbours.append(destination)
     
 def delLink(destination):
     dt[destination] = []
+    neighbours.remove(destination)
     
 def sendTableRequestMsg(dest):
     trMsg = {'type': 'table', 'source': IP, 'destination': dest}
-    sendMsg(trMsg)
+    nxtH = findNextHop(dest)
+    sendMsg(trMsg, nxtH)
     
 def sendTraceMsg(dest):
     traceMsg = {'type': 'trace', 'source': IP, 'destination': dest, 'hops': [IP]}
-    sendMsg(traceMsg)
+    nxtH = findNextHop(dest)
+    sendMsg(traceMsg, nxtH)
     
 def sendUpdateMsg():
     for neighbour in neighbours:
@@ -107,10 +111,11 @@ def sendUpdateMsg():
         updateMsg = {'type': 'update', 'source': IP, 'destination': neighbour, 'distances': distL}     
         sendMsg(updateMsg, nextHop)    
         
-def sendDataMsg(address):
+def sendDataMsg(dest):
     pl = createPayload()
-    dataMsg = {'type': 'data', 'source': IP, 'destination': address, 'payload': pl}
-    sendMsg(dataMsg, address)
+    dataMsg = {'type': 'data', 'source': IP, 'destination': dest, 'payload': pl}
+    nxtH = findNextHop(dest)
+    sendMsg(dataMsg, nxtH)
         
 def createDistancesList(dest):
     dl = {}
@@ -130,7 +135,7 @@ def sendMsg(msg, dest):
     msgJSON = json.dumps(msg)
     print("Message sent: "+str(msgJSON))
     router = findNextHop(dest)
-    s.sendto(msgJSON, router)
+    s.sendto(msgJSON, (router,PORT))
     
 def update():
     print("Sending update...")
