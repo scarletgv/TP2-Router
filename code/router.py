@@ -5,6 +5,7 @@ import socket
 from threading import Thread
 from threading import Timer
 import json
+import operator
 
 def startRouting():
     t1 = Thread(target = readInput)
@@ -23,12 +24,12 @@ def readInput():
             print("Creating link...")
             destIP = command[1]
             weight = command[2]
-            addLink(destIP, weight)
+            addLink(destIP, int(weight))
         elif command[0] == 'del':
             print("Removing link...")
             destIP = command[1]
             weight = command[2]
-            delLink(destIP, weight)
+            delLink(destIP, int(weight))
         elif command[0] == 'trace':
             print("Sending trace message...")
             destIP = command[1]
@@ -46,7 +47,7 @@ def readInput():
 def receiveMsgs():
     while True:
         msgJSON, senderIP = s.recvfrom(1024)
-        msg = json.loads(msgJSON)
+        msg = (json.loads(msgJSON.decode('utf-8')))
         
         msgType = msg['type']
         source = msg['source']
@@ -67,7 +68,10 @@ def receiveMsgs():
             msg['hops'].append(IP)
             # Se ele é o destino
             if dest == IP:
-                print(msg['hops'])
+                # Tem que enviar de volta pra source
+                # Com o payload = hops
+                #print(msg['hops'])
+                sendDataMsg(source, msg['hops'])
             else:
                 # Envia para proximo na rota
                 sendMsg(msg, dest)
@@ -76,23 +80,33 @@ def receiveMsgs():
             # Se ele é o destino
             if dest == IP: 
                 # Envia DATA para source com payload
-                sendDataMsg(source)
+                payload = createPayload
+                sendDataMsg(source, payload)
             else:
                 sendMsg(msg, dest)
         elif msgType == 'update':
             print("Type: update")
             # Atualiza tabela
-            updateTable(source, msg['distances'])            
+            updateTable(msg['distances'], source)     
+            print(dt)
         else:
             print("Invalid message received.")
             
-def addLink(destination, weight):
-    dt[destination].append({'dest': destination, 'weight': weight})
-    neighbours.append(destination)
+def addLink(neighbour, weight):
+    dt[neighbour].append({'nxtHop': neighbour, 'weight': weight, 'update': True})
+    neighbours.append(neighbour)
     
-def delLink(destination):
-    dt[destination] = []
-    neighbours.remove(destination)
+def delLink(neighbour):
+    # Remove todas as rotas que passam pelo vizinho deletado
+    # Incluindo todas as rotas do vizinho
+    dt[neighbour] = []
+    neighbours.remove(neighbour)
+    for router in dt:
+        if dt[router]:
+            for route in dt[router]:
+                print(route)
+                if route['nxtHop'] == neighbour:
+                    dt[router].remove(route)
     
 def sendTableRequestMsg(dest):
     trMsg = {'type': 'table', 'source': IP, 'destination': dest}
@@ -109,97 +123,150 @@ def sendUpdateMsg():
         distL = createDistancesList(neighbour)
         nextHop = findNextHop(neighbour)
         updateMsg = {'type': 'update', 'source': IP, 'destination': neighbour, 'distances': distL}     
-        sendMsg(updateMsg, nextHop)    
+        sendMsg(updateMsg, nextHop)     
         
-def sendDataMsg(dest):
-    pl = createPayload()
-    dataMsg = {'type': 'data', 'source': IP, 'destination': dest, 'payload': pl}
+def sendDataMsg(dest, payload):
+    dataMsg = {'type': 'data', 'source': IP, 'destination': dest, 'payload': payload}
     nxtH = findNextHop(dest)
     sendMsg(dataMsg, nxtH)
         
-def createDistancesList(dest):
+def createDistancesList(dest):   
     dl = {}
     minWeight = 10000
     for router in dt:
-        if router != dest:
+        if router != dest: # Split horizon
             if dt[router]:
                 for route in dt[router]:
-                    if route['weight'] < minWeight:
-                        minWeight = route['weight']
+                    if route['nxtHop'] != dest: # Split horizon
+                        if route['weight'] < minWeight:
+                            minWeight = route['weight']
                 if minWeight < 10000: # Se existe uma rota com menor custo
                     dl[router] = minWeight
                 minWeight = 10000
     return dl
         
 def sendMsg(msg, dest):
-    msgJSON = json.dumps(msg)
-    print("Message sent: "+str(msgJSON))
-    router = findNextHop(dest)
-    s.sendto(msgJSON, (router,PORT))
+    if dest != '':
+        msgJSON = json.dumps(msg)
+        print("Message sent: "+str(msgJSON))
+        router = findNextHop(dest)
+        s.sendto(msgJSON.encode('utf-8'), (router,PORT))
     
 def update():
     print("Sending update...")
     sendUpdateMsg()
-    Timer(pi, update).start()
-    
+    Timer(pi, update).start()  
 
 # Cria uma tabela de vetor de distâncias com IPs
 # de 127.0.1.1 até 127.0.1.16
-def createDistanceTable(IP):
+def createDistanceTable():
     addressList = ['127.0.1.' for i in range(0,16)]
     
     for i in range(0,16):
         addressList[i] += str(i+1)
     
     dt = {key:[] for key in addressList}
-    dt[IP] = 0
+    dt[IP] = [{'nxtHop': IP, 'weight': 0, 'update': True}]
+    
     return dt
 
-def updateTable(source, distances):
-    # Toda vez que atualizar a tabela,
-    # Atualiza o tempo?
-    # Talvez um contador +1 para que
-    # Na hora que der 4pi saiba que a 
-    # Rota foi atualizada
-    pass
+def addNewRoute(router, nextHop, weightNeighbour, weightDest):
+    weight = weightNeighbour + weightDest
+    dt[router].append({'nxtHop': nextHop, 'weight': weight, 'update': True})
     
-def findNextHop(dest):
+        
+def updateTable(distances, source):
+    neighbourWeight = 0
+    
+    for route in dt[source]:
+        if route['nxtHop'] == source: # É uma rota do vizinho para ele mesmo
+            neighbourWeight = route['weight']
+            break
+        
+    for newRoute in distances:
+        if dt[newRoute]:
+            routes = dt[newRoute].copy()
+            for route in routes:
+                if newRoute in route:
+                    # Existe a rota na lista de rotas
+                    if route['nxtHop'] == newRoute: # É uma rota
+                        if route['weight'] != distances[newRoute]: 
+                            addNewRoute(newRoute, source, neighbourWeight, distances[newRoute])
+                        else: # Mesmo peso = Mesma rota
+                            # Atualiza a rota
+                            # Isto não funciona porque não é a tabela real
+                            route['update'] = True
+                else:
+                    # Não existe a rota na lista, adiciona ela
+                    addNewRoute(newRoute, source, neighbourWeight, distances[newRoute])                    
+        else:
+            #Adiciona nova rota para o destino, usando o vizinho
+            addNewRoute(newRoute, source, neighbourWeight, distances[newRoute])  
+    
+
     # Lembrar de fazer balanceamento de carga aqui
     # Uma hora vai numa rota, outra hora vai na outra
     # Suponha: duas rotas no máximo com mesmo custo
+def findNextHop(dest):
     minWeight = 10000
     nxtHop = ''
     
+    if dt[dest]:
+        for route in dt[dest]:
+            if route['weight'] < minWeight:
+                minWeight = route['weight']
+                nxtHop = route['nxtHop']
+    return nxtHop    
+    
+def createPayload():
+    pl = []
     for router in dt:
         if dt[router]:
             for route in dt[router]:
-                if route['dest'] == dest:
-                    if route['weight'] < minWeight:
-                        minWeight = route['weight']
-                        nxtHop = router             
-    return nxtHop  
-    
-def createPayload():
-    # Tuplas com (destino, próx. hop, custo)
-    pass
+                pl.append((router, route['nxtHop'], route['weight']))  
+    pl.sort(key = operator.itemgetter(0, 1))
+    return pl  
+
+def resetUpdate():
+    for router in dt:
+        if dt[router]:
+            for route in dt[router]:
+                route['update'] = False
+                '''
+                Nova ideia: colocar FALSE só nas rotas
+                de update recebidas que não foram 
+                informadas
+                '''
+                    
+def removeOldRoutes():
+    for router in dt:
+        if dt[router]:
+            for route in dt[router]:
+                if route['update'] == False: # Se a rota não foi atualizada
+                    dt[router].remove(route)
+    resetUpdate()
     
 def updateRoutes():
     print("Removing old routes...")
     removeOldRoutes()
     Timer(4*pi, updateRoutes).start()
-    
-def removeOldRoutes():
-    # Encontra rotas que não foram atualizadas por 4pi s...?
-    # Zera o contador de atualização?
-    pass
-    
-    '''
-    Ideia para implementar aquele trem de rotas desatualizadas: 
-    coloca um contador pra cada rota, a cada update soma +1 no contador, 
-    quando der 4pi, se tiver 4 na rota, ela está atualizada, se não, ela 
-    será removida. Aí também todos os contadores serão zerados. 
-    Só que isso tem que ser MUITO rápido... Ou para tudo até terminar.
-    '''
+
+def createTopology(file):
+    with open(file, "r") as topology:
+        for line in topology:
+            command = line.split()
+            if command[0] == 'add':
+                print("Creating link...")
+                destIP = command[1]
+                weight = command[2]
+                addLink(destIP, int(weight))
+            elif command[0] == 'del':
+                print("Removing link...")
+                destIP = command[1]
+                weight = command[2]
+                delLink(destIP, int(weight))
+            else:
+                print("Invalid command.")
 
 '''
 Inicializaçao 
@@ -218,16 +285,18 @@ s.bind(address)
 # Criação da Tabela de Distancias e lista de vizinhos
 dt = {}
 neighbours = []
-createDistanceTable()
+dt = createDistanceTable()
+print(dt)
 
 # Startup
 if len(sys.argv) > 3:
     inputFile = sys.argv[3]
     print("Startup: "+str(inputFile))
+    createTopology(inputFile)
 
 # Roteamento
 try: 
     startRouting()
 except KeyboardInterrupt:
-    print("Finalizando o programa...")
+    print("Ending execution.")
     s.close()
